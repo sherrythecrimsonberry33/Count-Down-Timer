@@ -48,25 +48,32 @@ Author: Sheharyar, Aryan Mogera, Gerardo Garcia de Leon
 // #pragma config statements should precede project file includes.
 
 #include <xc.h>
-#include <stdio.h>
+#include <p24fxxxx.h>
 #include <p24F16KA101.h>
+#include <stdio.h>
+#include <math.h>
+#include <errno.h>
+#include <stdlib.h>
+
+
+#include "IOs.h"
+#include "TimeInterval.h"
 #include "clkChange.h"
 #include "UART2.h"
-#include "TimeInterval.h"
-#include "IOs.h"
-
+#include "TimerOperations.h"
+#include "TerminalDisplay.h"
 
 int main(void) {
-    newClk(500);  // Set clock to 500 kHz
+    newClk(8);
     
-    IOinit();     // Initialize the IOs
+    Timer timer;
+    Timer_init(&timer);
+    
+    Display_init();
+    IOControl_init(&timer);
     
     while(1) {
-        
-        Idle();
-    
-        IOcheck();
-       
+        IOControl_check(&timer);
     }
     
     return 0;

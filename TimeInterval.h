@@ -2,14 +2,12 @@
 File:   TimeInterval.h (submit)
 Author: Sheharyar, Aryan Mogera, Gerardo Garcia de Leon
 */
-
-#ifndef TIMEDELAY_H
-#define TIMEDELAY_H
+#ifndef TIMER_INTERVAL_H
+#define TIMER_INTERVAL_H
 
 #include <xc.h>
+#include <stdint.h>
 
-void initTimer1(void);
-void setBlinkInterval(uint16_t interval_ms);
-void stopBlinking(void);
+int Delay_ms(uint16_t time_ms);
 
-#endif // TIMEDELAY_H
+#endif 

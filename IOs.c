@@ -1,135 +1,122 @@
 /*
-File:   IOs.c  (submit)
-Author: Sheharyar, Aryan Mogera, Gerardo Garcia de Leon
-*/
-
+ * File:   IOs.c
+ * Author: Sheharyar
+ *
+ */
+// IOControl.c
 #include "IOs.h"
 #include "TimeInterval.h"
-#include "clkChange.h"
-#include "UART2.h"
+#include "TerminalDisplay.h"
+#include <xc.h>
 
-typedef enum {
-    STATE_IDLE,
-    STATE_PB1,
-    STATE_PB2,
-    STATE_PB3,
-    STATE_PB1_PB2,
-    STATE_PB1_PB3,
-    STATE_PB2_PB3,
-    STATE_ALL_PB
-} ButtonCurrState;
 
-static ButtonCurrState currentState = STATE_IDLE;
-static ButtonCurrState previousState = STATE_IDLE;
+#define FCY 8000000UL  // 8 MHz clock frequency
+#define CLOCK_FREQ FCY
+#define PB1 PORTAbits.RA2
+#define PB2 PORTAbits.RA4
+#define PB3 PORTBbits.RB4
+#define LED LATBbits.LATB8
 
-void IOinit(void) {
-    AD1PCFG = 0xFFFF;  // Set all pins to digital mode
+static int pb2_hold_time = 0;
+//static int pb3_press_duration = 0;
+//static int pb3_prev_state = 1;
+static Timer* global_timer;
 
-    // Configure  resistors
-    CNPU1bits.CN0PUE = 1;  // PB3 
-    CNPU1bits.CN1PUE = 1;  // PB2 
-    CNPU2bits.CN30PUE = 1; // PB1 
-     
-    // Enable CN interrupts
-    CNEN1bits.CN0IE = 1;   // PB3 
-    CNEN1bits.CN1IE = 1;   // PB2 
-    CNEN2bits.CN30IE = 1;  // PB1 
+static unsigned long timer_ms = 0;
+static int pb3_pressed = 0;
+static unsigned long pb3_press_start = 0;
+static const unsigned long pb3_long_press_threshold = 3000; // 3 seconds
+
+
+
+void IOControl_init(Timer* timer) {
+    global_timer = timer;
+
+    AD1PCFG = 0xFFFF;
     
-    IFS1bits.CNIF = 0;  // Clear CN interrupt flag
-    IEC1bits.CNIE = 1;  // Enable CN interrupt
-    IPC4bits.CNIP = 6;  // Set CN interrupt priority
+    CNPU1bits.CN0PUE = 1;
+    CNPU1bits.CN1PUE = 1;
+    CNPU2bits.CN30PUE = 1;
     
-    // Configure I/O
-    TRISBbits.TRISB8 = 0;  
-    LED = 0;               
+    CNEN1bits.CN0IE = 1;
+    CNEN1bits.CN1IE = 1;
+    CNEN2bits.CN30IE = 1;
     
-    TRISAbits.TRISA2 = 1;  // PB1 as input
-    TRISBbits.TRISB4 = 1;  // PB2 as input
-    TRISAbits.TRISA4 = 1;  // PB3 as input
-
-    InitUART2();
-    initTimer1();  // Initialize Timer1 for LED blinking
+    IFS1bits.CNIF = 0;
+    IEC1bits.CNIE = 1;
+    
+    TRISBbits.TRISB8 = 0;
+    LED = 0;
+    
+    TRISAbits.TRISA2 = 1;
+    TRISAbits.TRISA4 = 1;
+    TRISBbits.TRISB4 = 1;
 }
 
-void displayState(ButtonCurrState state) {
-    Disp2String("\r                                        \r"); // Clear the line
-    switch(state) {
-        case STATE_IDLE:
-            Disp2String("Nothing pressed");
-            break;
-        case STATE_PB1:
-            Disp2String("PB1 is pressed");
-            break;
-        case STATE_PB2:
-            Disp2String("PB2 is pressed");
-            break;
-        case STATE_PB3:
-            Disp2String("PB3 is pressed");
-            break;
-        case STATE_PB1_PB2:
-            Disp2String("PB1 and PB2 are pressed");
-            break;
-        case STATE_PB1_PB3:
-            Disp2String("PB1 and PB3 are pressed");
-            break;
-        case STATE_PB2_PB3:
-            Disp2String("PB2 and PB3 are pressed");
-            break;
-        case STATE_ALL_PB:
-            Disp2String("All PBs pressed");
-            break;
-    }
-}
-
-void updateLEDState(ButtonCurrState state) {
-    switch(state) {
-        case STATE_PB1:
-            setBlinkInterval(250);  // 0.25 sec intervals
-            break;
-        case STATE_PB2:
-            setBlinkInterval(2000);  // 2 sec intervals
-            break;
-        case STATE_PB3:
-            setBlinkInterval(4000);  // 4 sec intervals
-            break;
-        case STATE_PB1_PB2:
-        case STATE_PB1_PB3:
-        case STATE_PB2_PB3:
-        case STATE_ALL_PB:
-            stopBlinking();
-            LED = 1;  // Keep LED on
-            break;
-        case STATE_IDLE:
-            stopBlinking();
-            LED = 0;  // Turn LED off
-            break;
-    }
-}
-
-void IOcheck(void) {
-    ButtonCurrState newState;
-
-    if (!PB1 && PB2 && PB3) newState = STATE_PB1;
-    else if (PB1 && !PB2 && PB3) newState = STATE_PB2;
-    else if (PB1 && PB2 && !PB3) newState = STATE_PB3;
-    else if (!PB1 && !PB2 && PB3) newState = STATE_PB1_PB2;
-    else if (!PB1 && PB2 && !PB3) newState = STATE_PB1_PB3;
-    else if (PB1 && !PB2 && !PB3) newState = STATE_PB2_PB3;
-    else if (!PB1 && !PB2 && !PB3) newState = STATE_ALL_PB;
-    else newState = STATE_IDLE;
-
-    if (newState != currentState) {
-        previousState = currentState;
-        currentState = newState;
+void IOControl_check(Timer* timer) {
+    if (timer->state == STATE_IDLE || timer->state == STATE_PAUSED) {
+        if (!PB1) {
+            Timer_incrementMinutes(timer);
+            Display_update(timer);
+            Delay_ms(300);
+        }
         
-        // Update LED state
-        updateLEDState(currentState);
-        displayState(currentState);
+        if (!PB2) {
+            pb2_hold_time += 300;
+            int increment = (pb2_hold_time >= 3000) ? 5 : 1;
+            Timer_incrementSeconds(timer, increment);
+            Display_update(timer);
+            Delay_ms(300);
+        } else {
+            pb2_hold_time = 0;
+        }
+    }
+    
+  if (Timer_isRunning(timer)) {
+        LED ^= 1;
+        Timer_tick(timer);
+        if (Timer_isFinished(timer)) {
+            Display_alarm();
+            LED = 1;
+        } else {
+            Display_count(timer);
+        }
+        Delay_ms(1000);
+    } else {
+        LED = 0;
+    }
+
+    // Increment our timer
+    timer_ms += 10;  // Assuming this function is called every 10ms
+
+    // Check for PB3 press and release
+    if (!PB3) {
+        if (!pb3_pressed) {
+            pb3_pressed = 1;
+            pb3_press_start = timer_ms;
+        }
+    } else {
+        if (pb3_pressed) {
+            pb3_pressed = 0;
+            unsigned long press_duration = timer_ms - pb3_press_start;
+
+            if (press_duration >= pb3_long_press_threshold) {
+                Timer_reset(timer);
+                Display_reset();
+            } else {
+                if (Timer_isRunning(timer)) {
+                    Timer_pause(timer);
+                    Display_update(timer);
+                } else {
+                    Timer_start(timer);
+                    Display_count(timer);
+                }
+            }
+        }
     }
 }
-
 void __attribute__((interrupt, auto_psv)) _CNInterrupt(void) {
-    IFS1bits.CNIF = 0;  // Clear CN interrupt flag
+    IFS1bits.CNIF = 0;
+    
 
 }
-
