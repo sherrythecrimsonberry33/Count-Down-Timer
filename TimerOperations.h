@@ -19,4 +19,4 @@ void Timer_tick(Timer* timer);
 int Timer_isFinished(Timer* timer);
 int Timer_isRunning(Timer* timer);
 
-#endif // TIMER_H
+#endif // TIMER_OPERATIONS_H
