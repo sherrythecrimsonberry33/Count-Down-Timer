@@ -10,4 +10,4 @@ void Display_reset(void);
 void Display_count(Timer* timer);
 
 
-#endif // DISPLAY_H
+#endif // TERMINAL_DISPLAY_H
